@@ -191,44 +191,6 @@ jobs:
           name: tdlib-windows-${{matrix.build.arch}}
           path: build\Release\tdjson.dll
 
-  # build-wasm:
-  #   name: Build TDLib for Web
-  #   runs-on: ubuntu-22.04
-  #   steps:
-  #     - name: Install gperf
-  #       run: sudo apt-get install -y -q gperf clang-14 libc++-dev libc++abi-dev tar wget
-  #     - name: Install latest CMake
-  #       run: |
-  #         wget https://github.com/Kitware/CMake/releases/download/v3.25.0/cmake-3.25.0-linux-x86_64.sh
-  #         chmod +x ./cmake-*.sh
-  #         mkdir cmake
-  #         ./cmake-*.sh --prefix=./cmake --skip-license
-  #         sudo cp -RTv ./cmake /usr/
-  #         cmake --version
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         repository: "tdlib/td"
-  #         ref: ${{ inputs.tdlib }}
-
-  #     - name: Build for WASM
-  #       run: |
-  #         git clone https://github.com/emscripten-core/emsdk.git
-  #         cd emsdk
-  #         git pull
-  #         ./emsdk install latest
-  #         ./emsdk activate latest
-  #         source ./emsdk_env.sh
-  #         cd ..
-
-  #         cd example/web
-  #         ./build-openssl.sh
-  #         ./build-tdlib.sh
-  #         ./copy-tdlib.sh
-  #     - uses: actions/upload-artifact@v4
-  #       with:
-  #         name: tdlib-wasm
-  #         path: example/web/tdweb/src/prebuilt/release/*
-
   build-macos:
     name: Create universal macOS shared library
     needs: [prebuild-macos]
@@ -342,6 +304,19 @@ jobs:
           mv tdlib-meta/meta.yml ../
           mv tdlib-schema/td_api.tl ../
 
+      - name: Get meta info
+        id: meta
+        run: |
+          while read line; do
+            echo "$line" | sed 's/: /=/' >> "$GITHUB_OUTPUT"
+          done < meta.yml
+        
+      - name: Commit Hash last
+        id: commit-hash-last
+        run: |
+          hash="${{ steps.meta.outputs.commit-hash }}"
+          echo "result=${hash: -7}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v4
         with:
           name: td
@@ -349,8 +324,17 @@ jobs:
 
       - run: rm -rf td
 
-      - name: Create pull request
-        uses: peter-evans/create-pull-request@v5
+      - name: Release
+        uses: softprops/action-gh-release@v2
         with:
-          branch: tdlib-update
-          title: Update tdlib to ${{ inputs.tdlib }}
+          make_latest: true
+          tag_name: "0.${{ steps.meta.outputs.version }}-${{ steps.commit-hash-last.outputs.result }}"
+          body: |
+            - Built TDLib [${{ steps.meta.outputs.version }} `${{ steps.commit-hash-last.outputs.result }}`](https://github.com/tdlib/td/tree/${{ steps.meta.outputs.commit-hash }})
+          files: |
+            libtdjson-*
+            tdjson-*.dll
+            meta.yml
+            td_api.td
+
+          token: ${{ secrets.GITHUB_TOKEN }}
