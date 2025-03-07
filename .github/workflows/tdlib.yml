@@ -338,6 +338,6 @@ jobs:
             libtdjson-*
             tdjson-*.dll
             meta.yml
-            td_api.td
+            td_api.tl
 
           token: ${{ secrets.GITHUB_TOKEN }}
