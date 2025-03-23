@@ -8,9 +8,6 @@ on:
         type: string
         required: true
 
-permissions: 
-  contents: write
-
 jobs:
   build-linux-x64:
     name: Build TDLib on Linux x86_64 (glibc)
@@ -270,6 +267,9 @@ jobs:
           path: ./result/libtdjson.so
 
   dist:
+    permissions:
+      contents: write
+
     name: Bundle artifacts to dist
     runs-on: ubuntu-22.04
     needs:
@@ -284,7 +284,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-     
+
       - uses: actions/download-artifact@v4
         with:
           pattern: tdlib-*
@@ -313,12 +313,12 @@ jobs:
           while read line; do
             echo "$line" | sed 's/: /=/' >> "$GITHUB_OUTPUT"
           done < meta.yml
-        
+
       - name: Commit Hash last
         id: commit-hash-last
         run: |
           hash="${{ steps.meta.outputs.commit-hash }}"
-          echo "result=${hash: -7}" >> "$GITHUB_OUTPUT"
+          echo "result=${hash:0:7}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
