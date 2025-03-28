@@ -224,7 +224,7 @@ jobs:
           - os: ubuntu-22.04-arm
             arch: arm64
             artifact_arch: arm64
-          - os: ubuntu-22.04-arm
+          - os: ubuntu-22.04
             arch: amd64
             artifact_arch: x64
     runs-on: ${{matrix.spec.os}}
