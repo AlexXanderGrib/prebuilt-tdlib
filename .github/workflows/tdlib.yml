@@ -221,10 +221,10 @@ jobs:
           # Tried macos-14, it cant run docker now https://github.com/marketplace/actions/setup-docker-on-macos
           # Need to be replaced with any arm64 image as soon as possible
           # Takes 2 h to build with emulation
-          - os: ubuntu-22.04
+          - os: ubuntu-22.04-arm
             arch: arm64
             artifact_arch: arm64
-          - os: ubuntu-22.04
+          - os: ubuntu-22.04-arm
             arch: amd64
             artifact_arch: x64
     runs-on: ${{matrix.spec.os}}
@@ -269,6 +269,7 @@ jobs:
   dist:
     permissions:
       contents: write
+      pull-requests: write
 
     name: Bundle artifacts to dist
     runs-on: ubuntu-22.04
@@ -284,6 +285,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - uses: actions/download-artifact@v4
         with:
@@ -303,3 +306,4 @@ jobs:
         with:
           branch: tdlib-update
           title: Update tdlib to ${{ inputs.tdlib }}
+          token: ${{ secrets.GITHUB_TOKEN }}

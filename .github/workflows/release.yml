@@ -5,18 +5,25 @@ on:
     branches: main
     paths: td
 
+  workflow_dispatch:
+
 jobs:
   create-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
       - name: Get meta info
         id: meta
         run: |
           while read line; do
             echo "$line" | sed 's/: /=/' >> "$GITHUB_OUTPUT"
-          done < meta.yml
+          done < td/meta.yml
 
       - name: Commit Hash last
         id: commit-hash-last
