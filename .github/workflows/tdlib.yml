@@ -16,7 +16,7 @@ jobs:
       matrix:
         spec:
           - os: ubuntu-22.04
-            cmake_arch: x64
+            cmake_arch: x86_64
             arch: x64
 
           - os: ubuntu-22.04-arm
