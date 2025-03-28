@@ -10,7 +10,7 @@ on:
 
 jobs:
   build-linux:
-    name: Build TDLib on Linux x86_64 (glibc)
+    name: Build TDLib on Linux (glibc)
     runs-on: ${{ matrix.spec.os }}
     strategy:
       matrix:
