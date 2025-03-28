@@ -9,9 +9,19 @@ on:
         required: true
 
 jobs:
-  build-linux-x64:
+  build-linux:
     name: Build TDLib on Linux x86_64 (glibc)
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.spec.os }}
+    strategy:
+      matrix:
+        spec:
+          - os: ubuntu-22.04
+            cmake_arch: x64
+            arch: x64
+
+          - os: ubuntu-22.04-arm
+            cmake_arch: aarch64
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,7 +31,7 @@ jobs:
         run: sudo apt-get install -y -q gperf clang-14 libc++-dev libc++abi-dev tar wget
       - name: Install latest CMake
         run: |
-          wget https://github.com/Kitware/CMake/releases/download/v3.30.5/cmake-3.30.5-linux-x86_64.sh 
+          wget https://github.com/Kitware/CMake/releases/download/v3.31.5/cmake-3.31.5-linux-${{ matrix.spec.cmake_arch }}.sh 
           chmod +x ./cmake-*.sh
           mkdir cmake
           ./cmake-*.sh --prefix=./cmake --skip-license
@@ -49,9 +59,10 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tdlib-linux-x64
+          name: tdlib-linux-${{ matrix.spec.arch }}
           path: build/libtdjson.so
       - name: Get Meta
+        if: matrix.spec.arch == 'x64'
         run: |
           rm meta.yml -f
           TDLIB_VERSION=`grep -oP "(?<=project\\(TDLib VERSION ).*?(?= LANGUAGES CXX C\\))" CMakeLists.txt`
@@ -60,38 +71,15 @@ jobs:
           echo "version: $TDLIB_VERSION" >> meta.yml
           echo "commit-hash: $TDLIB_COMMIT_HASH" >> meta.yml
       - uses: actions/upload-artifact@v4
+        if: matrix.spec.arch == 'x64'
         with:
           name: tdlib-meta
           path: meta.yml
       - uses: actions/upload-artifact@v4
+        if: matrix.spec.arch == 'x64'
         with:
           name: tdlib-schema
           path: td/generate/scheme/td_api.tl
-
-  build-linux-arm64:
-    name: Build TDLib on Linux arm64 (glibc)
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
-        with:
-          nix_path: nixpkgs=channel:nixpkgs-unstable
-      - name: Restore Nix cache
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: /nix/store
-          key: ${{ runner.os }}-nix-${{ hashFiles('scripts/*.nix') }}
-          restore-keys: |
-            ${{ runner.os }}-nix-
-      - name: Build TDLib
-        run: |
-          cd scripts
-          ./build-linux.sh ${{ inputs.tdlib }} aarch64-linux-gnu.2.22
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tdlib-linux-arm64
-          path: ${{ env.TO_UPLOAD }}
 
   prebuild-macos:
     name: Build TDLib on macOS
@@ -275,8 +263,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs:
       [
-        build-linux-x64,
-        build-linux-arm64,
+        build-linux,
         prebuild-macos,
         build-windows,
         build-macos,
@@ -293,7 +280,28 @@ jobs:
           pattern: tdlib-*
           path: td
 
-      - name: List arifacts
+      - name: Unpack artifacts
+        run: |
+          cd td
+
+          mv ./tdlib-linux-arm64/libtdjson.so ./libtdjson-arm64-glibc.so
+          mv ./tdlib-linux-arm64-musl/libtdjson.so ./libtdjson-arm64-musl.so
+          mv ./tdlib-linux-x64/libtdjson.so ./libtdjson-x64-glibc.so
+          mv ./tdlib-linux-x64-musl/libtdjson.so ./libtdjson-x64-musl.so
+
+          mv ./tdlib-macos-arm64/libtdjson.dylib ./libtdjson-arm64.dylib
+          mv ./tdlib-macos-x64/libtdjson.dylib ./libtdjson-x64.dylib
+          mv ./tdlib-macos/libtdjson.dylib ./libtdjson-universal.dylib
+
+          mv  ./tdlib-windows-x86/tdjson.dll ./tdjson-x32.dll
+          mv  ./tdlib-windows-x64/tdjson.dll ./tdjson-x64.dll
+
+          mv ./tdlib-meta/meta.yml ./
+          mv ./tdlib-schema/td_api.tl ./
+
+          rm -r ./tdlib-*
+
+      - name: List artifacts
         run: ls td
 
       - uses: actions/upload-artifact@v4
