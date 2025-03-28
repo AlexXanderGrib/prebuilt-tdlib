@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    branches: main
+    paths: td
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Get meta info
+        id: meta
+        run: |
+          while read line; do
+            echo "$line" | sed 's/: /=/' >> "$GITHUB_OUTPUT"
+          done < meta.yml
+
+      - name: Commit Hash last
+        id: commit-hash-last
+        run: |
+          hash="${{ steps.meta.outputs.commit-hash }}"
+          echo "result=${hash:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          make_latest: true
+          tag_name: "0.${{ steps.meta.outputs.version }}-${{ steps.commit-hash-last.outputs.result }}"
+          body: |
+            - Built TDLib [${{ steps.meta.outputs.version }} `${{ steps.commit-hash-last.outputs.result }}`](https://github.com/tdlib/td/tree/${{ steps.meta.outputs.commit-hash }})
+          files: |
+            td/*
+
+          token: ${{ secrets.GITHUB_TOKEN }}
