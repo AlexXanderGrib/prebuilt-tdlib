@@ -16,7 +16,6 @@ on:
           - build
           - build_publish
 
-
 jobs:
   prepare-meta:
     name: Extract TDLib metadata
@@ -51,12 +50,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: tdlib-meta
-          path: meta.yml
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tdlib-meta
-          path:  td/generate/scheme/td_api.tl
-            
+          path: |
+            meta.yml
+            td/generate/scheme/td_api.tl
 
   build-linux:
     name: Build TDLib on Linux
@@ -429,5 +425,3 @@ jobs:
             - **Metadata**: `meta.yml`
           files: release/*
           token: ${{ secrets.GITHUB_TOKEN }}
-
-  
