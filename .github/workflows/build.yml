@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
     inputs:
       tdlib:
-        # https://github.com/tdlib/td/search?q=Update+version+to&type=commits
         description: "TDLib git ref (e.g. v1.8.0 or a commit hash)"
         type: string
         required: true
@@ -17,81 +16,171 @@ on:
           - build
           - build_publish
 
+
 jobs:
+  prepare-meta:
+    name: Extract TDLib metadata
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      commit-hash: ${{ steps.meta.outputs.commit-hash }}
+      commit-hash-short: ${{ steps.meta.outputs.commit-hash-short }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: "tdlib/td"
+          ref: ${{ inputs.tdlib }}
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          TDLIB_VERSION=$(grep -oP "(?<=project\\(TDLib VERSION ).*?(?= LANGUAGES CXX C\\))" CMakeLists.txt)
+          TDLIB_COMMIT_HASH=$(git rev-parse HEAD)
+          TDLIB_COMMIT_HASH_SHORT=${TDLIB_COMMIT_HASH:0:7}
+
+          echo "version=$TDLIB_VERSION" >> $GITHUB_OUTPUT
+          echo "commit-hash=$TDLIB_COMMIT_HASH" >> $GITHUB_OUTPUT
+          echo "commit-hash-short=$TDLIB_COMMIT_HASH_SHORT" >> $GITHUB_OUTPUT
+
+          # Create meta file for upload
+          cat > meta.yml << EOF
+          version: $TDLIB_VERSION
+          commit-hash: $TDLIB_COMMIT_HASH
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-meta
+          path: |
+            meta.yml
+            td/generate/scheme/td_api.tl
+
   build-linux:
-    name: Build TDLib on Linux (glibc)
+    name: Build TDLib on Linux
     runs-on: ${{ matrix.spec.os }}
+    env:
+      CMAKE_VERSION: "3.31.8"
+      CLANG_VERSION: "14"
     strategy:
       matrix:
         spec:
           - os: ubuntu-22.04
             cmake_arch: x86_64
             arch: x64
-
+            libc: glibc
           - os: ubuntu-22.04-arm
             cmake_arch: aarch64
             arch: arm64
+            libc: glibc
+        libc: [glibc, musl]
+        exclude:
+          # Use Docker for musl builds to avoid complexity
+          - libc: musl
+
     steps:
       - uses: actions/checkout@v4
         with:
           repository: "tdlib/td"
           ref: ${{ inputs.tdlib }}
-      - name: Install gperf
-        run: sudo apt-get install -y -q gperf clang-14 libc++-dev libc++abi-dev tar wget
-      - name: Install latest CMake
+
+      - name: Cache CMake installation
+        uses: actions/cache@v4
+        with:
+          path: ./cmake
+          key: cmake-${{ env.CMAKE_VERSION }}-${{ matrix.spec.cmake_arch }}
+
+      - name: Install dependencies
         run: |
-          wget https://github.com/Kitware/CMake/releases/download/v3.31.5/cmake-3.31.5-linux-${{ matrix.spec.cmake_arch }}.sh 
-          chmod +x ./cmake-*.sh
-          mkdir cmake
-          ./cmake-*.sh --prefix=./cmake --skip-license
+          sudo apt-get update -q
+          sudo apt-get install -y -q gperf clang-${{ env.CLANG_VERSION }} libc++-dev libc++abi-dev
+
+      - name: Install CMake
+        run: |
+          if [ ! -d "./cmake" ]; then
+            wget -q https://github.com/Kitware/CMake/releases/download/v${{ env.CMAKE_VERSION }}/cmake-${{ env.CMAKE_VERSION }}-linux-${{ matrix.spec.cmake_arch }}.sh
+            chmod +x ./cmake-*.sh
+            mkdir cmake
+            ./cmake-*.sh --prefix=./cmake --skip-license
+          fi
           sudo cp -RTv ./cmake /usr/
           cmake --version
 
       - name: Build TDLib
         run: |
           mkdir -p build && cd build
-          cmake  -DCMAKE_CXX_COMPILER=/usr/bin/clang++-14 -DCMAKE_C_COMPILER=/usr/bin/clang-14 \
-            -DCMAKE_BUILD_TYPE=Release -DTD_ENABLE_LTO=ON -DCMAKE_INSTALL_PREFIX:PATH=../tdlib \
-            -DCMAKE_AR=/usr/bin/llvm-ar-14 -DCMAKE_NM=/usr/bin/llvm-nm-14 \
-            -DCMAKE_OBJDUMP=/usr/bin/llvm-objdump-14 -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-14 \
-            -DOPENSSL_USE_STATIC_LIBS=TRUE -DZLIB_USE_STATIC_LIBS=TRUE  ..
-          cmake --build . --target tdjson -- -j 2
-          cd ..
-      - name: Strip
-        run: strip build/libtdjson.so
-      - name: Info
+          cmake \
+            -DCMAKE_CXX_COMPILER=/usr/bin/clang++-${{ env.CLANG_VERSION }} \
+            -DCMAKE_C_COMPILER=/usr/bin/clang-${{ env.CLANG_VERSION }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DTD_ENABLE_LTO=ON \
+            -DCMAKE_AR=/usr/bin/llvm-ar-${{ env.CLANG_VERSION }} \
+            -DCMAKE_NM=/usr/bin/llvm-nm-${{ env.CLANG_VERSION }} \
+            -DCMAKE_OBJDUMP=/usr/bin/llvm-objdump-${{ env.CLANG_VERSION }} \
+            -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-${{ env.CLANG_VERSION }} \
+            -DOPENSSL_USE_STATIC_LIBS=TRUE \
+            -DZLIB_USE_STATIC_LIBS=TRUE \
+            ..
+          cmake --build . --target tdjson --parallel $(nproc)
+          strip libtdjson.so
+
+      - name: Verify build
         run: |
           uname -a
           ldd --version
-          openssl version
           ldd build/libtdjson.so
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tdlib-linux-${{ matrix.spec.arch }}
+          name: tdlib-linux-${{ matrix.spec.arch }}-${{ matrix.spec.libc }}
           path: build/libtdjson.so
-      - name: Get Meta
-        if: matrix.spec.arch == 'x64'
+
+  build-linux-musl:
+    name: Build TDLib on Linux (musl)
+    runs-on: ${{ matrix.spec.os }}
+    strategy:
+      matrix:
+        spec:
+          - os: ubuntu-22.04-arm
+            arch: arm64
+            platform: linux/arm64
+          - os: ubuntu-22.04
+            arch: x64
+            platform: linux/amd64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build TDLib with musl
+        uses: docker/build-push-action@v6
+        with:
+          push: false
+          platforms: ${{ matrix.spec.platform }}
+          build-args: GIT_REF=${{ inputs.tdlib }}
+          tags: tdlib:build-${{ matrix.spec.arch }}
+          file: ./Dockerfile.musl
+          load: true
+          cache-from: type=gha,scope=musl-${{ matrix.spec.arch }}
+          cache-to: type=gha,mode=max,scope=musl-${{ matrix.spec.arch }}
+
+      - name: Extract artifact
         run: |
-          rm meta.yml -f
-          TDLIB_VERSION=`grep -oP "(?<=project\\(TDLib VERSION ).*?(?= LANGUAGES CXX C\\))" CMakeLists.txt`
-          TDLIB_COMMIT_HASH=`git rev-parse HEAD`
+          mkdir -p result
+          container_id=$(docker create tdlib:build-${{ matrix.spec.arch }})
+          docker cp $container_id:/result/libtdjson.so ./result/
+          docker rm $container_id
 
-          echo "version: $TDLIB_VERSION" >> meta.yml
-          echo "commit-hash: $TDLIB_COMMIT_HASH" >> meta.yml
       - uses: actions/upload-artifact@v4
-        if: matrix.spec.arch == 'x64'
         with:
-          name: tdlib-meta
-          path: meta.yml
-      - uses: actions/upload-artifact@v4
-        if: matrix.spec.arch == 'x64'
-        with:
-          name: tdlib-schema
-          path: td/generate/scheme/td_api.tl
+          name: tdlib-linux-${{ matrix.spec.arch }}-musl
+          path: ./result/libtdjson.so
 
-  prebuild-macos:
+  build-macos:
     name: Build TDLib on macOS
+    runs-on: ${{ matrix.spec.os }}
     strategy:
       matrix:
         spec:
@@ -101,45 +190,83 @@ jobs:
           - os: macos-14
             arch: arm64
             opt: /opt/homebrew/opt
-    runs-on: ${{matrix.spec.os}}
+
     steps:
       - uses: actions/checkout@v4
         with:
           repository: "tdlib/td"
           ref: ${{ inputs.tdlib }}
-      - name: homebrew cache
+
+      - name: Cache Homebrew
         uses: actions/cache@v4
         with:
-          path: ~/Library/Caches/Homebrew
-          key: homebrew-${{github.run_id}}
+          path: |
+            ~/Library/Caches/Homebrew
+            ${{ matrix.spec.opt }}/gperf
+            ${{ matrix.spec.opt }}/openssl
+            ${{ matrix.spec.opt }}/zlib
+          key: homebrew-${{ matrix.spec.os }}-${{ hashFiles('**/Brewfile') || 'default' }}
           restore-keys: |
-            homebrew-
+            homebrew-${{ matrix.spec.os }}-
 
       - name: Install dependencies
-        run: HOMEBREW_NO_INSTALL_CLEANUP=1 brew install gperf openssl zlib
+        run: |
+          export HOMEBREW_NO_INSTALL_CLEANUP=1
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          brew install gperf openssl zlib
 
-      - name: CMake version
-        run: cmake --version
       - name: Build TDLib
         run: |
           mkdir -p build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release \
+          cmake \
+            -DCMAKE_BUILD_TYPE=Release \
             -DTD_ENABLE_LTO=ON \
-            -DOPENSSL_ROOT_DIR=${{matrix.spec.opt}}/openssl \
-            -DZLIB_INCLUDE_DIR=${{matrix.spec.opt}}/zlib/include \
-            -DZLIB_LIBRARY=${{matrix.spec.opt}}/zlib/lib/libz.a \
-            -DOPENSSL_USE_STATIC_LIBS=TRUE -DZLIB_USE_STATIC_LIBS=TRUE ..
-          cmake --build . --target tdjson -- -j 3
-          cd ..
-      - name: Info
+            -DOPENSSL_ROOT_DIR=${{ matrix.spec.opt }}/openssl \
+            -DZLIB_INCLUDE_DIR=${{ matrix.spec.opt }}/zlib/include \
+            -DZLIB_LIBRARY=${{ matrix.spec.opt }}/zlib/lib/libz.a \
+            -DOPENSSL_USE_STATIC_LIBS=TRUE \
+            -DZLIB_USE_STATIC_LIBS=TRUE \
+            ..
+          cmake --build . --target tdjson --parallel $(sysctl -n hw.ncpu)
+
+      - name: Verify build
         run: |
           uname -a
-          ${{matrix.spec.opt}}/openssl/bin/openssl version
+          ${{ matrix.spec.opt }}/openssl/bin/openssl version
           otool -L build/libtdjson.dylib
+
       - uses: actions/upload-artifact@v4
         with:
-          name: tdlib-macos-${{matrix.spec.arch}}
+          name: tdlib-macos-${{ matrix.spec.arch }}
           path: build/libtdjson.dylib
+
+  build-macos-universal:
+    name: Create universal macOS library
+    needs: [build-macos]
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tdlib-macos-*
+
+      - name: Create universal binary
+        run: |
+          mkdir -p universal
+          lipo \
+            tdlib-macos-x64/libtdjson.dylib \
+            tdlib-macos-arm64/libtdjson.dylib \
+            -output universal/libtdjson.dylib \
+            -create
+
+          # Verify the universal binary
+          file universal/libtdjson.dylib
+          otool -L universal/libtdjson.dylib
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-macos-universal
+          path: universal/libtdjson.dylib
 
   build-windows:
     name: Build TDLib on Windows
@@ -149,132 +276,114 @@ jobs:
         build:
           - arch: x86
             cmake_arch: Win32
+            vcpkg_triplet: x86-windows-static
           - arch: x64
             cmake_arch: x64
+            vcpkg_triplet: x64-windows-static
+
     steps:
       - uses: actions/checkout@v4
         with:
           repository: "tdlib/td"
           ref: ${{ inputs.tdlib }}
-      - name: vcpkg cache
+
+      - name: Cache vcpkg
         uses: actions/cache@v4
         with:
-          path: '~\AppData\Local\vcpkg\archives'
-          key: vcpkg-${{ github.run_id }}
+          path: |
+            ~\AppData\Local\vcpkg\archives
+            C:\vcpkg\installed
+          key: vcpkg-${{ matrix.build.arch }}-${{ hashFiles('vcpkg.json') || 'default' }}
           restore-keys: |
-            vcpkg-
+            vcpkg-${{ matrix.build.arch }}-
 
-      - name: Update
-        run: vcpkg update
-      - name: Install dependencies using vcpkg
-        run: vcpkg install gperf:${{matrix.build.arch}}-windows-static openssl:${{matrix.build.arch}}-windows-static zlib:${{matrix.build.arch}}-windows-static
+      - name: Install dependencies
+        run: |
+          vcpkg update
+          vcpkg install gperf:${{ matrix.build.vcpkg_triplet }} openssl:${{ matrix.build.vcpkg_triplet }} zlib:${{ matrix.build.vcpkg_triplet }}
 
-      - name: CMake version
-        run: cmake --version
       - name: Build TDLib
         shell: pwsh
         run: |
           mkdir build
           cd build
-          cmake -A ${{matrix.build.cmake_arch}} `
+          cmake -A ${{ matrix.build.cmake_arch }} `
             -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
-            -DVCPKG_TARGET_TRIPLET=${{matrix.build.arch}}-windows-static `
-            -DOPENSSL_USE_STATIC_LIBS=TRUE -DZLIB_USE_STATIC_LIBS=TRUE ..
-          cmake --build . --target tdjson --config Release --parallel 2
-          cd ..
-        # It should be possible to print the dependencies using dumpbin.exe
+            -DVCPKG_TARGET_TRIPLET=${{ matrix.build.vcpkg_triplet }} `
+            -DOPENSSL_USE_STATIC_LIBS=TRUE `
+            -DZLIB_USE_STATIC_LIBS=TRUE `
+            ..
+          cmake --build . --target tdjson --config Release --parallel $env:NUMBER_OF_PROCESSORS
+
       - uses: actions/upload-artifact@v4
         with:
-          name: tdlib-windows-${{matrix.build.arch}}
+          name: tdlib-windows-${{ matrix.build.arch }}
           path: build\Release\tdjson.dll
 
-  build-macos:
-    name: Create universal macOS shared library
-    needs: [prebuild-macos]
-    runs-on: macos-13
+  organize-build-artifacts:
+    name: Organize build artifacts
+    runs-on: ubuntu-22.04
+    needs:
+      - prepare-meta
+      - build-linux
+      - build-linux-musl
+      - build-macos
+      - build-macos-universal
+      - build-windows
+
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: tdlib-macos-*
-      - name: Combine shared libraries
+          pattern: tdlib-*
+          path: artifacts
+
+      - name: Organize build files
         run: |
-          mkdir -p to-upload
-          lipo tdlib-macos-x64/libtdjson.dylib tdlib-macos-arm64/libtdjson.dylib \
-            -output to-upload/libtdjson.dylib -create
-          cd to-upload
-          file libtdjson.dylib
-          otool -L libtdjson.dylib
+          mkdir -p build-release
+
+          # Linux binaries
+          cp artifacts/tdlib-linux-x64-glibc/libtdjson.so build-release/libtdjson-x64-glibc.so
+          cp artifacts/tdlib-linux-arm64-glibc/libtdjson.so build-release/libtdjson-arm64-glibc.so
+          cp artifacts/tdlib-linux-x64-musl/libtdjson.so build-release/libtdjson-x64-musl.so
+          cp artifacts/tdlib-linux-arm64-musl/libtdjson.so build-release/libtdjson-arm64-musl.so
+
+          # macOS binaries (individual + universal)
+          cp artifacts/tdlib-macos-x64/libtdjson.dylib build-release/libtdjson-x64.dylib
+          cp artifacts/tdlib-macos-arm64/libtdjson.dylib build-release/libtdjson-arm64.dylib
+          cp artifacts/tdlib-macos-universal/libtdjson.dylib build-release/libtdjson-universal.dylib
+
+          # Windows binaries
+          cp artifacts/tdlib-windows-x86/tdjson.dll build-release/tdjson-x32.dll
+          cp artifacts/tdlib-windows-x64/tdjson.dll build-release/tdjson-x64.dll
+
+          # Metadata
+          cp artifacts/tdlib-meta/meta.yml build-release/
+          cp artifacts/tdlib-meta/td_api.tl build-release/
+
+      - name: Delete intermediate artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: |
+            tdlib-linux-*
+            tdlib-macos-*
+            tdlib-windows-*
+            tdlib-meta
+          failOnError: false
+
       - uses: actions/upload-artifact@v4
         with:
-          name: tdlib-macos
-          path: to-upload
+          name: tdlib-build-complete
+          path: build-release/*
 
-  build-linux-docker-musl:
-    name: Built TDLib on Linux (musl)
-
-    strategy:
-      matrix:
-        spec:
-          - os: ubuntu-22.04-arm
-            arch: arm64
-            artifact_arch: arm64
-          - os: ubuntu-22.04
-            arch: amd64
-            artifact_arch: x64
-    runs-on: ${{matrix.spec.os}}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: ${{matrix.spec.arch}}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build image
-        uses: docker/build-push-action@v6
-        with:
-          push: false
-          platforms: linux/${{matrix.spec.arch}}
-          build-args: GIT_REF=${{ inputs.tdlib }}
-          tags: tdlib:build
-          file: ./Dockerfile.musl
-          load: true
-        env:
-          DOCKER_BUILD_RECORD_UPLOAD: false
-
-      - name: Run Container and Copy Result
-        run: |
-          mkdir -p result
-          container_id=$(docker create tdlib:build)
-          docker cp $container_id:/result/libtdjson.so ./result/
-          docker rm $container_id
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tdlib-linux-${{matrix.spec.artifact_arch}}-musl
-          path: ./result/libtdjson.so
-
-  commit-and-release:
+  publish-release:
     if: inputs.mode == 'build_publish'
-    permissions:
-      contents: write
-
-    name: Commit meta.yml and create release
+    name: Create GitHub Release
     runs-on: ubuntu-22.04
     needs:
-      [
-        build-linux,
-        prebuild-macos,
-        build-windows,
-        build-macos,
-        build-linux-docker-musl
-      ]
+      - prepare-meta
+      - organize-build-artifacts
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -283,75 +392,39 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: tdlib-*
-          path: td-artifacts
+          name: tdlib-release
+          path: release
 
-      # Download only the meta.yml to commit
-      - name: Update meta.yml
+      - name: Update meta.yml in repository
         run: |
-          mkdir -p td
-          cp td-artifacts/tdlib-meta/meta.yml ./meta.yml
-
-      # Commit only meta.yml to main
-      - name: Commit meta.yml changes
-        run: |
+          cp release/meta.yml ./meta.yml
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add ./meta.yml
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
+          if ! git diff --staged --quiet; then
             git commit -m "Update TDLib to ${{ inputs.tdlib }}"
             git push
           fi
 
-      # Prepare all artifacts for release
-      - name: Prepare release artifacts
-        run: |
-          cd td-artifacts
-
-          mkdir -p ../release-files
-
-          # Linux binaries
-          cp ./tdlib-linux-arm64/libtdjson.so ../release-files/libtdjson-arm64-glibc.so
-          cp ./tdlib-linux-arm64-musl/libtdjson.so ../release-files/libtdjson-arm64-musl.so
-          cp ./tdlib-linux-x64/libtdjson.so ../release-files/libtdjson-x64-glibc.so
-          cp ./tdlib-linux-x64-musl/libtdjson.so ../release-files/libtdjson-x64-musl.so
-
-          # macOS binaries
-          cp ./tdlib-macos-arm64/libtdjson.dylib ../release-files/libtdjson-arm64.dylib
-          cp ./tdlib-macos-x64/libtdjson.dylib ../release-files/libtdjson-x64.dylib
-          cp ./tdlib-macos/libtdjson.dylib ../release-files/libtdjson-universal.dylib
-
-          # Windows binaries
-          cp ./tdlib-windows-x86/tdjson.dll ../release-files/tdjson-x32.dll
-          cp ./tdlib-windows-x64/tdjson.dll ../release-files/tdjson-x64.dll
-
-          # Schema and meta files
-          cp ./tdlib-meta/meta.yml ../release-files/
-          cp ./tdlib-schema/td_api.tl ../release-files/
-
-      # Get meta info for release
-      - name: Get meta info
-        id: meta
-        run: |
-          while read line; do
-            echo "$line" | sed 's/: /=/' >> "$GITHUB_OUTPUT"
-          done < release-files/meta.yml
-
-      - name: Commit Hash short
-        id: commit-hash-short
-        run: |
-          hash="${{ steps.meta.outputs.commit-hash }}"
-          echo "result=${hash:0:7}" >> "$GITHUB_OUTPUT"
-
-      # Create release with all artifacts
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           make_latest: true
-          tag_name: "0.${{ steps.meta.outputs.version }}-${{ steps.commit-hash-short.outputs.result }}"
+          tag_name: "0.${{ needs.prepare-meta.outputs.version }}-${{ needs.prepare-meta.outputs.commit-hash-short }}"
+          name: "TDLib ${{ needs.prepare-meta.outputs.version }} (${{ needs.prepare-meta.outputs.commit-hash-short }})"
           body: |
-            - Built TDLib [${{ steps.meta.outputs.version }} `${{ steps.commit-hash-short.outputs.result }}`](https://github.com/tdlib/td/tree/${{ steps.meta.outputs.commit-hash }})
-          files: release-files/*
+            ## TDLib Build ${{ needs.prepare-meta.outputs.version }}
+
+            Built from TDLib commit [`${{ needs.prepare-meta.outputs.commit-hash-short }}`](https://github.com/tdlib/td/tree/${{ needs.prepare-meta.outputs.commit-hash }})
+
+            ### Included Binaries:
+            - **Linux (glibc)**: `libtdjson-x64-glibc.so`, `libtdjson-arm64-glibc.so`
+            - **Linux (musl)**: `libtdjson-x64-musl.so`, `libtdjson-arm64-musl.so`
+            - **macOS**: `libtdjson-x64.dylib`, `libtdjson-arm64.dylib`, `libtdjson-universal.dylib`
+            - **Windows**: `tdjson-x32.dll`, `tdjson-x64.dll`
+            - **Schema**: `td_api.tl`
+            - **Metadata**: `meta.yml`
+          files: release/*
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  
