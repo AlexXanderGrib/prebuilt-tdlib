@@ -54,7 +54,7 @@ jobs:
           path: meta.yml
       - uses: actions/upload-artifact@v4
         with:
-          name: tdlib-schema
+          name: tdlib-meta
           path:  td/generate/scheme/td_api.tl
             
 
@@ -361,7 +361,7 @@ jobs:
 
           # Metadata
           cp artifacts/tdlib-meta/meta.yml build-release/
-          cp artifacts/tdlib-schema/td_api.tl build-release/
+          cp artifacts/tdlib-meta/td/generate/scheme/td_api.tl build-release/
 
       - name: Delete intermediate artifacts
         uses: geekyeggo/delete-artifact@v5
@@ -371,7 +371,6 @@ jobs:
             tdlib-macos-*
             tdlib-windows-*
             tdlib-meta
-            tdlib-schema
           failOnError: false
 
       - uses: actions/upload-artifact@v4
