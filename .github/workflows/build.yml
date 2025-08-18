@@ -371,7 +371,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tdlib-build-complete
+          name: tdlib-release
           path: build-release/*
 
   publish-release:
