@@ -236,7 +236,7 @@ jobs:
           mkdir -p universal
           lipo tdlib-macos-x64/libtdjson.dylib tdlib-macos-arm64/libtdjson.dylib \
             -output universal/libtdjson.dylib -create
-          lipo -verify_arch x86_64 arm64 universal/libtdjson.dylib
+          lipo universal/libtdjson.dylib -verify_arch x86_64 arm64
           otool -L universal/libtdjson.dylib
 
       - uses: actions/upload-artifact@v4
