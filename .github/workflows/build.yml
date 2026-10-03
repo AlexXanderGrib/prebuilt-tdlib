@@ -258,8 +258,10 @@ jobs:
       matrix:
         build:
           - arch: x86
+            msvc_arch: amd64_x86
             vcpkg_triplet: x86-windows-static
           - arch: x64
+            msvc_arch: amd64
             vcpkg_triplet: x64-windows-static
     steps:
       - uses: actions/checkout@v4
@@ -271,7 +273,8 @@ jobs:
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: ${{ matrix.build.arch }}
+          # Keep the compiler host 64-bit even when targeting an x86 DLL.
+          arch: ${{ matrix.build.msvc_arch }}
 
       - uses: actions/setup-python@v5
         with:

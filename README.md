@@ -28,7 +28,7 @@ remain the same.
 
 Compiler output is cached across Linux and macOS builds; Linux also caches
 ThinLTO's native objects (up to 512 MiB). Windows caches vcpkg binary packages,
-and musl uses Docker layer caching. Compilation parallelism
+uses the 64-bit MSVC host tools for both x86 and x64, and musl uses Docker layer caching. Compilation parallelism
 is limited by CPU count and available memory to avoid exhausting the runners.
 Artifacts use fast ZIP compression to reduce upload time and storage.
 
