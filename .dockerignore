@@ -1,0 +1,5 @@
+**
+!Dockerfile.musl
+!scripts/
+!scripts/build-tdlib.sh
+!scripts/verify-tdjson.py
