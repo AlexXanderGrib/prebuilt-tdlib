@@ -1,19 +1,36 @@
-FROM alpine:3.20 AS build
-WORKDIR /tmp
-ENV GIT_REF=HEAD
+# syntax=docker/dockerfile:1
+FROM alpine:3.23 AS build
+RUN apk add --no-cache bash build-base linux-headers git clang lld llvm \
+    zlib-dev zlib-static openssl-dev openssl-libs-static gperf php cmake ninja \
+    ccache python3
 
-RUN apk update && apk upgrade && \
-  apk add alpine-sdk linux-headers git zlib-dev openssl-dev gperf php cmake
-  
-RUN git clone https://github.com/tdlib/td.git && \ 
-  cd td && git checkout ${GIT_REF} && rm -rf build && mkdir build && cd build && \
-  cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=../tdlib .. && \
-  cmake --build . --target tdjson -- -j 2 
+WORKDIR /src
+ARG GIT_REF=HEAD
+ARG BUILD_JOBS
+ENV CC=clang CXX=clang++ CCACHE_DIR=/ccache CCACHE_MAXSIZE=1G
 
-RUN cp /tmp/td/build/libtdjson.so /libtdjson.so
-RUN strip /libtdjson.so
+# GIT_REF must be an ARG: an ENV ignores docker --build-arg.
+RUN git init td && cd td && \
+    git remote add origin https://github.com/tdlib/td.git && \
+    git fetch --depth=1 origin "$GIT_REF" && git checkout --detach FETCH_HEAD
 
-FROM alpine:3.20
-VOLUME [ "/result" ]
-COPY --from=build /libtdjson.so /result/
+COPY scripts/build-tdlib.sh scripts/verify-tdjson.py /scripts/
+# Match the C and C++ runtime choices, or CMake adds -lgcc_s for C targets.
+# The policy floor lets CMake 4 configure older TDLib releases.
+RUN --mount=type=cache,target=/ccache \
+    --mount=type=cache,target=/src/build/lto-cache \
+    CMAKE_BUILD_PARALLEL_LEVEL="$BUILD_JOBS" \
+    bash /scripts/build-tdlib.sh /src/td /src/build \
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+      -DCMAKE_C_FLAGS="-static-libgcc" \
+      -DCMAKE_CXX_FLAGS="-static-libstdc++ -static-libgcc" && \
+    mkdir /out && cp /src/build/libtdjson.so /out/libtdjson.so && \
+    strip /out/libtdjson.so && \
+    python3 /scripts/verify-tdjson.py /out/libtdjson.so \
+      --version "$(sed -nE 's/^project\(TDLib VERSION ([0-9.]+) .*/\1/p' td/CMakeLists.txt)" \
+      --commit "$(git -C td rev-parse HEAD)" && \
+    ! readelf -d /out/libtdjson.so | grep -E 'NEEDED.*lib(ssl|crypto|z|stdc\+\+|gcc_s)\.'
 
+# BuildKit's local exporter writes this single file directly to the host.
+FROM scratch AS artifact
+COPY --from=build /out/libtdjson.so /libtdjson.so
