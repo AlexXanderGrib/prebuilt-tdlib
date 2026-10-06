@@ -47,7 +47,9 @@ python3 scripts/verify-tdjson.py build/libtdjson.so \
 ```
 
 Use CMake 3.24 or newer for static zlib discovery. The script modifies the TDLib
-checkout using upstream's `SplitSource.php`; use a dedicated checkout. Set
+checkout using upstream's `SplitSource.php`; use a dedicated checkout. It repairs
+the known missing comma in that helper in TDLib revision `bc9c263` and checks PHP
+syntax before compiling. Set
 `CMAKE_BUILD_PARALLEL_LEVEL` to a positive integer to override the job limit.
 The smoke test loads the shared library, checks its version and commit, and
 executes a JSON request without connecting to Telegram.
