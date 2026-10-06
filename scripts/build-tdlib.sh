@@ -11,6 +11,23 @@ mkdir -p "$2"
 build_dir=$(cd "$2" && pwd)
 shift 2
 
+# TDLib bc9c263 has a missing comma in its source-splitting helper. Repair only
+# that exact typo, preserving the requested revision and its library sources.
+python3 - "$source_dir/SplitSource.php" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+source = path.read_bytes()
+broken = (b"'MessageContentUploadId' => 'MessageContentUploadId'\n"
+          b"            'MessageCopyOptions' => 'MessageCopyOptions',")
+if source.count(broken) == 1:
+    path.write_bytes(source.replace(broken, broken.replace(b"'\n", b"',\n", 1), 1))
+    print("Repaired missing comma in TDLib's SplitSource.php.")
+PY
+# Catch other upstream syntax errors before spending time compiling generators.
+php -l "$source_dir/SplitSource.php"
+
 # Reserve memory for the linker and OS; TDLib has large translation units even
 # after splitting. An explicit CMAKE_BUILD_PARALLEL_LEVEL overrides this limit.
 case $(uname -s) in
