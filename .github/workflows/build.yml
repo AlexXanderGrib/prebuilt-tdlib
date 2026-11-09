@@ -36,7 +36,7 @@ jobs:
     outputs:
       ref: ${{ steps.manual.outputs.ref || steps.upstream.outputs.ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'schedule' || inputs.tdlib == ''
 
       - name: Use requested revision
@@ -63,7 +63,7 @@ jobs:
       commit-hash: ${{ steps.meta.outputs.commit-hash }}
       commit-hash-short: ${{ steps.meta.outputs.commit-hash-short }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: tdlib/td
           ref: ${{ needs.select-revision.outputs.ref }}
@@ -82,7 +82,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           printf 'version: %s\ncommit-hash: %s\n' "$TDLIB_VERSION" "$TDLIB_COMMIT_HASH" > meta.yml
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           retention-days: 1
           name: tdlib-meta
@@ -109,8 +109,8 @@ jobs:
           - os: ubuntu-22.04-arm
             arch: arm64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           repository: tdlib/td
           ref: ${{ needs.prepare-meta.outputs.commit-hash }}
@@ -123,7 +123,7 @@ jobs:
           cmake --version
 
       - name: Cache compiler output
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             .ccache
@@ -148,7 +148,7 @@ jobs:
             --version '${{ needs.prepare-meta.outputs.version }}' \
             --commit '${{ needs.prepare-meta.outputs.commit-hash }}'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           retention-days: 1
           name: tdlib-linux-${{ matrix.spec.arch }}-glibc
@@ -171,11 +171,11 @@ jobs:
             arch: x64
             platform: linux/amd64
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build, verify and export TDLib with musl
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.musl
@@ -185,7 +185,7 @@ jobs:
           cache-from: type=gha,scope=musl-${{ matrix.spec.arch }}
           cache-to: type=gha,mode=max,scope=musl-${{ matrix.spec.arch }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           retention-days: 1
           name: tdlib-linux-${{ matrix.spec.arch }}-musl
@@ -210,8 +210,8 @@ jobs:
           - os: macos-15
             arch: arm64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           repository: tdlib/td
           ref: ${{ needs.prepare-meta.outputs.commit-hash }}
@@ -221,7 +221,7 @@ jobs:
         run: brew install gperf openssl@3 zlib php ninja ccache
 
       - name: Cache compiler output
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .ccache
           key: ccache-${{ matrix.spec.os }}-${{ matrix.spec.arch }}-${{ hashFiles('scripts/build-tdlib.sh') }}-${{ needs.prepare-meta.outputs.commit-hash }}
@@ -246,7 +246,7 @@ jobs:
             --version '${{ needs.prepare-meta.outputs.version }}' \
             --commit '${{ needs.prepare-meta.outputs.commit-hash }}'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           retention-days: 1
           name: tdlib-macos-${{ matrix.spec.arch }}
@@ -259,7 +259,7 @@ jobs:
     needs: build-macos
     runs-on: macos-15-intel
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: tdlib-macos-*
 
@@ -271,7 +271,7 @@ jobs:
           lipo universal/libtdjson.dylib -verify_arch x86_64 arm64
           otool -L universal/libtdjson.dylib
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           retention-days: 1
           name: tdlib-macos-universal
@@ -290,25 +290,22 @@ jobs:
       matrix:
         build:
           - arch: x86
-            msvc_arch: amd64_x86
             vcpkg_triplet: x86-windows-static
           - arch: x64
-            msvc_arch: amd64
             vcpkg_triplet: x64-windows-static
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           repository: tdlib/td
           ref: ${{ needs.prepare-meta.outputs.commit-hash }}
           path: td
 
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          # Keep the compiler host 64-bit even when targeting an x86 DLL.
-          arch: ${{ matrix.build.msvc_arch }}
+      - name: Set up MSVC
+        shell: pwsh
+        run: ./scripts/setup-msvc.ps1 -Architecture '${{ matrix.build.arch }}'
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           architecture: ${{ matrix.build.arch }}
@@ -323,7 +320,7 @@ jobs:
           "revision=$revision" >> $env:GITHUB_OUTPUT
 
       - name: Cache vcpkg binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vcpkg-cache
           key: vcpkg-windows-2022-${{ matrix.build.vcpkg_triplet }}-${{ steps.vcpkg.outputs.revision }}-openssl-zlib-gperf-v1
@@ -359,7 +356,7 @@ jobs:
             --commit '${{ needs.prepare-meta.outputs.commit-hash }}'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           retention-days: 1
           name: tdlib-windows-${{ matrix.build.arch }}
@@ -379,7 +376,7 @@ jobs:
       - build-windows
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: tdlib-*
           path: artifacts
@@ -407,7 +404,7 @@ jobs:
           cp artifacts/tdlib-meta/meta.yml build-release/
           cp artifacts/tdlib-meta/td/generate/scheme/td_api.tl build-release/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tdlib-release
           path: build-release/*
@@ -425,13 +422,13 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           # Earlier runs can update metadata while this run waits to start.
           ref: ${{ github.ref_name }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: tdlib-release
           path: release
@@ -448,7 +445,7 @@ jobs:
           fi
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           make_latest: true
           tag_name: "0.${{ needs.prepare-meta.outputs.version }}-${{ needs.prepare-meta.outputs.commit-hash-short }}"

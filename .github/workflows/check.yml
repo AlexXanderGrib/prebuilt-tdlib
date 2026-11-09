@@ -21,7 +21,7 @@ jobs:
   check:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check workflows and scripts
         env:
           ACTIONLINT_VERSION: "1.7.12"
@@ -32,3 +32,29 @@ jobs:
           shellcheck scripts/build-tdlib.sh
           python3 -m py_compile scripts/*.py
           python3 -m unittest discover -s scripts/tests -v
+
+  check-msvc:
+    name: Check MSVC (${{ matrix.arch }})
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        arch: [x86, x64]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up MSVC
+        shell: pwsh
+        run: ./scripts/setup-msvc.ps1 -Architecture '${{ matrix.arch }}'
+      - name: Compile and run with the requested architecture
+        shell: pwsh
+        run: |
+          if ($env:VSCMD_ARG_HOST_ARCH -ne 'x64') { throw 'Expected a 64-bit compiler host.' }
+          @'
+          #if defined(_WIN64) != EXPECT_64
+          #error Unexpected target architecture
+          #endif
+          int main() { return 0; }
+          '@ | Set-Content smoke.cpp
+          cl /nologo /EHsc /MT /DEXPECT_64=${{ matrix.arch == 'x64' && '1' || '0' }} smoke.cpp /Fe:smoke.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./smoke.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
