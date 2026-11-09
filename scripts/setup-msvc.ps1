@@ -13,8 +13,8 @@ if ($LASTEXITCODE -ne 0 -or !$installation) {
 
 # Keep the compiler host 64-bit even when targeting an x86 DLL. Import the
 # developer prompt's environment into subsequent GitHub Actions steps.
-$command = "`"$installation\Common7\Tools\VsDevCmd.bat`" -no_logo -arch=$Architecture -host_arch=x64 >nul && set"
-$variables = & $env:ComSpec /d /s /c "`"$command`""
+$command = "call `"$installation\Common7\Tools\VsDevCmd.bat`" -no_logo -arch=$Architecture -host_arch=x64 >nul && set"
+$variables = & $env:ComSpec /d /c $command
 if ($LASTEXITCODE -ne 0) {
     throw 'Visual Studio developer environment setup failed.'
 }
