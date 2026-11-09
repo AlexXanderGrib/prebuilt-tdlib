@@ -30,4 +30,5 @@ jobs:
           tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
           shellcheck scripts/build-tdlib.sh
-          python3 -m py_compile scripts/verify-tdjson.py
+          python3 -m py_compile scripts/*.py
+          python3 -m unittest discover -s scripts/tests -v

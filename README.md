@@ -25,6 +25,22 @@ and select `build` to test without publishing. The workflow resolves the ref
 once, then builds and verifies the same commit for every platform. Select
 `build_publish` to update metadata and publish a release. Artifact filenames
 remain the same.
+Leave the TDLib ref empty to run the same update check used by the schedule.
+
+The same workflow checks upstream daily at **03:23 UTC** (06:23 Moscow time).
+It reads the version in `CMakeLists.txt` at the latest commit on TDLib's `master`
+branch. If that version is newer than the highest published release, it builds
+that exact commit for every platform. If several versions were missed, it goes
+straight to the latest. With no published releases, it starts at upstream HEAD.
+Changes within an already published version do not trigger another scheduled
+build; use a manual run with `tdlib=master` (or a commit hash) to publish those.
+
+Successful builds publish all binaries, `td_api.tl` and metadata through the
+existing release job. Published versions are skipped; failed builds are retried
+on the next daily run. Scheduled and manual builds are serialized to avoid
+duplicate builds and competing metadata updates. The schedule becomes active
+once this workflow is on the repository's default branch and uses the built-in
+`GITHUB_TOKEN`, with no additional secrets required.
 
 Compiler output is cached across Linux and macOS builds; Linux also caches
 ThinLTO's native objects (up to 512 MiB). Windows caches vcpkg binary packages,

@@ -1,12 +1,14 @@
 name: Build TDLib and Release
 
 on:
+  schedule:
+    - cron: "23 3 * * *"
   workflow_dispatch:
     inputs:
       tdlib:
-        description: "TDLib git ref (e.g. v1.8.0 or a commit hash)"
+        description: "TDLib git ref; leave empty to check for a newer upstream version"
         type: string
-        required: true
+        required: false
       mode:
         type: choice
         description: Mode
@@ -19,12 +21,42 @@ on:
 permissions:
   contents: read
 
+# A waiting check resolves releases after the previous build has finished.
+concurrency:
+  group: tdlib-build-and-release
+  cancel-in-progress: false
+
 env:
   CCACHE_MAXSIZE: 1G
 
 jobs:
+  select-revision:
+    name: Select TDLib revision
+    runs-on: ubuntu-22.04
+    outputs:
+      ref: ${{ steps.manual.outputs.ref || steps.upstream.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'schedule' || inputs.tdlib == ''
+
+      - name: Use requested revision
+        if: github.event_name == 'workflow_dispatch' && inputs.tdlib != ''
+        id: manual
+        env:
+          TDLIB_REF: ${{ inputs.tdlib }}
+        run: echo "ref=$TDLIB_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Check upstream TDLib version
+        if: github.event_name == 'schedule' || inputs.tdlib == ''
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/find-tdlib-update.py
+
   prepare-meta:
     name: Resolve TDLib revision and metadata
+    needs: select-revision
+    if: needs.select-revision.outputs.ref != ''
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -34,7 +66,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: tdlib/td
-          ref: ${{ inputs.tdlib }}
+          ref: ${{ needs.select-revision.outputs.ref }}
 
       - name: Extract metadata
         id: meta
@@ -383,7 +415,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    if: inputs.mode == 'build_publish'
+    if: github.event_name == 'schedule' || inputs.mode == 'build_publish'
     name: Create GitHub Release
     runs-on: ubuntu-22.04
     needs:
@@ -396,6 +428,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Earlier runs can update metadata while this run waits to start.
+          ref: ${{ github.ref_name }}
 
       - uses: actions/download-artifact@v4
         with:
